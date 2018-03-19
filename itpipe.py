@@ -1,4 +1,4 @@
-# Like unix pipes, but with python iterators
+# Like unix pipes, but with python iterators -- experimental
 # functions, machines etc take as rhs op of |
 import itertools
 import sys
@@ -117,7 +117,7 @@ class Then(Machine):
         raise StopIteration
         yield b
 
-class Files(Machine):
+class Cat(Machine):
     def run(self, inputIterable, *args, raw=False):
         for n in args:
             with open(n, 'r') as f:
@@ -127,7 +127,6 @@ class Files(Machine):
                         break
                     if raw: yield l
                     else: yield l.rstrip()
-File = Files
 
 class Show(Machine):
     def run(self, inputIterable):
