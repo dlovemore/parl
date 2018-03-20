@@ -1,5 +1,5 @@
 from parl import itpipe
-from parl.itpipe import indexable
+from parl.itpipe import indexable, IndexableOutput
 from parl.util import taggedtuple
 from parl.fn import fn
 from copy import copy
@@ -33,9 +33,10 @@ class Parser(itpipe.Machine):
         while (pos==0 or tokens[pos-1].tag != 'EOF') and tokens[pos].tag != 'EOF':
             result = self.grammar.parse(tokens, pos)
             if not result:
-                furthestPos = tokens.pos # see indexable
+                if isinstance(tokens, IndexableOutput):
+                    pos = len(tokens.buf) # hack, see IndexableOutput
                 token = tokens[pos]
-                raise ParseError(f'Syntax error at {token}, line={token.line}, column={token.column}', token)
+                raise ParseError(f'Syntax error at line={token.line}, column={token.column}', token)
             value, pos = result
             yield value
 
