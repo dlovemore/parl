@@ -20,6 +20,13 @@ A machine is a callable that takes an iterable input and returns an iterable out
     def go(self, inputIterable):
         """Returns an iterable, by default calls run."""
         return self.run(inputIterable, *self.args, **self.kwargs)
+    def run(self, input, *args, **kwargs):
+        """
+Implement in subclasses, if go 
+Input is an iterable, args and kwargs are constructor arguments.
+Returns an iterable, such as a list. This method can be a generator, yielding results.
+"""
+        raise NotImplementedError("Abstract method")
     def __call__(self, input=None):
         """input is an iterable."""
         # Not sure if this is good. It would be simpler not to have Stdin here.
@@ -68,7 +75,7 @@ If instance of Machine use that otherwise if callable apply using Map."""
     if type(f).__name__ in {'classobj', 'type'}: 
         f = f()
     if not isinstance(f, Machine) and hasattr(f, '__call__'):
-        f = Map(f)
+        f = Apply(f)
     return f
 
 class Input(Machine):
@@ -114,12 +121,6 @@ class Items(Machine):
         return items.__iter__()
 Item = Items
 
-class Then(Machine):
-    def run(self, inputIterable, a, b):
-        yield a
-        raise StopIteration
-        yield b
-
 class Cat(Machine):
     def run(self, input, raw=False):
         for n in input:
@@ -156,9 +157,8 @@ class Print(Machine):
         yield
 
 class Apply(Machine):
-    def go(self, input):
+    def run(self, input, *fns):
         arg = input
-        fns = self.args
         for f in fns:
             arg = f(arg)
         return arg

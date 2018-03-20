@@ -11,7 +11,8 @@ class Token:
     # TODO: what is best here?
     def __repr__(self):
         #return f'Token({self.tag!r},{self.value!r},{self.line!r},{self.column!r})'
-        return f'{self.tag!s}({self.value!r})'
+        #return f'{self.tag!s}({self.value!r})'
+        return f'#{self.value!s}'
 #    def __str__(self):
 #        return f'{self.value!s}({self.line}:{self.column})'
 

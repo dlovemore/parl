@@ -18,20 +18,19 @@ class Parser(itpipe.Machine):
     """Repeatedly parses grammar until EOF or parsing fails.
 """
     def __init__(self, grammar):
-        self.args = [grammar] # for str, repr; yuck
-        self.kwargs = None # for str, repr
         grammar = toGrammar(grammar)
-        self.grammar = grammar.flatten()
+        grammar = grammar.flatten()
+        super().__init__(grammar)
     # TODO Need to think about this class. It's a bit over complicated.
     # TODO Maybe have separate interactive parser.
     # A grammar may explicitly specify a terminating EOF explicitly limiting to
     # a single result.
-    def go(self, input):
+    def run(self, input, grammar):
         pos = 0
         tokens = indexable(input)
         # this is ugly
         while (pos==0 or tokens[pos-1].tag != 'EOF') and tokens[pos].tag != 'EOF':
-            result = self.grammar.parse(tokens, pos)
+            result = grammar.parse(tokens, pos)
             if not result:
                 if isinstance(tokens, IndexableOutput):
                     pos = len(tokens.buf) # hack, see IndexableOutput
@@ -255,9 +254,8 @@ class Rule(Grammar):
         self.flattened = False
         self.name = name
         if g: self.grammar = toGrammar(g)
-        if not make: self.make = taggedtuple(name, ['value'])
-    #def make(self, value):
-        #print(self.name,":",value)
+        if not make: make = taggedtuple(name, ['value'])
+        self.make = make
     def __call__(self, *gs, make=None):
         self.grammar = toGrammar(gs)
         return self
