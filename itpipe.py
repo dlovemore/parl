@@ -1,33 +1,33 @@
-# Like unix pipes, but with python iterators -- experimental
-# functions, machines etc take as rhs op of |
+"""
+Like unix pipes, but with python iterators -- experimental
+functions, machines etc take as rhs op of |
+"""
 import itertools
 import sys
 import ast
 import re
-from fn import fn
+from parl.fn import fn
 
 # Perhaps call Machine something better?
-# what's the idea here, do we still need this?
-class PipeOutput:
-    def __init__(self, machine, input):
-        self.machine=machine
-        self.input=input
-    def __iter__(self):
-        return self.machine.go(self.input)
-
-
 class Machine:
+    """
+A machine is a callable that takes an iterable input and returns an iterable output.
+"""
     def __init__(self, *args, **kwargs):
+        """These arguments are usually passed to run"""
         self.args = args
         self.kwargs = kwargs
     def go(self, inputIterable):
-        """Returns an iterable"""
+        """Returns an iterable, by default calls run."""
         return self.run(inputIterable, *self.args, **self.kwargs)
     def __call__(self, input=None):
+        """input is an iterable."""
+        # Not sure if this is good. It would be simpler not to have Stdin here.
+        if input is None: input = Stdin()
         """May return more complex object such as indexable or list"""
         return self.go(input)
     def __iter__(self):
-        return self.go(Input())
+        return self.go(Stdin())
     def __or__(self, f):
         machine = toMachine(f)
         return machine.reverse_or(self)
@@ -40,13 +40,16 @@ class Machine:
     def __repr__(self):
         return str(self)
     def __str__(self):
+        # TODO there's probably a much better way of doing this.
         s=self.__class__.__name__
-        if self.args or self.kwargs:
+        args = hasattr(self, 'args') and self.args
+        kwargs = hasattr(self, 'kwargs') and self.kwargs
+        if args or kwargs:
             s+='('
-            if self.args:
+            if args:
                 s+=",".join([repr(a) for a in self.args])
-            if self.kwargs:
-                if self.args or self.input and self.kwargs:
+            if kwargs:
+                if args:
                     s+=", "
                 s+=",".join([str(k)+"="+str(v) for k,v in self.kwargs.items()])
             s+=')'
@@ -85,7 +88,7 @@ class Stdin(Machine):
                 break
             if raw: yield l
             else: yield l.rstrip()
-    def __str__(self): return "-"
+    def __str__(self): return "Stdin()"
 
 def forceArgs(*args): return args
 def forceIterable(iterable): return forceArgs(*iterable)
@@ -100,7 +103,7 @@ class List(Machine):
 
 class oD(Machine):
     def reverse_or(self, machine):
-        return machine.go(Stdin())
+        return machine.go()
 
 class Do(Machine):
     def run(self, inputIterable, iterable):
@@ -118,8 +121,19 @@ class Then(Machine):
         yield b
 
 class Cat(Machine):
-    def run(self, inputIterable, *args, raw=False):
-        for n in args:
+    def run(self, input, raw=False):
+        for n in input:
+            with open(n, 'r') as f:
+                while True:
+                    l = f.readline()
+                    if not l:
+                        break
+                    if raw: yield l
+                    else: yield l.rstrip()
+
+class Cat(Machine):
+    def run(self, input, *filenames, raw=False):
+        for n in filenames:
             with open(n, 'r') as f:
                 while True:
                     l = f.readline()

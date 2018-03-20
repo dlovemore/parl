@@ -1,22 +1,51 @@
-import attr
-import itpipe
-from itpipe import Do, indexable
+from parl import itpipe
+from parl.itpipe import indexable
+from parl.util import taggedtuple
+from parl.fn import fn
 from copy import copy
 import collections
 
 # Initially based on http://www.jayconrod.com/posts/38/a-simple-interpreter-from-scratch-in-python-part-2
 
-Result = collections.namedtuple('Result', ['value', 'pos'])
+# Todo this needs to pass parse stack around rather than just pos.
 
-class Parser(itpipe.Filter):
-    def run(self, input, grammar):
+Result = taggedtuple('Result', ['value', 'pos'])
+
+class ParseError(Exception):
+    pass
+
+class Parser(itpipe.Machine):
+    """Repeatedly parses grammar until EOF or parsing fails.
+"""
+    def __init__(self, grammar):
+        self.args = [grammar] # for str, repr; yuck
+        self.kwargs = None # for str, repr
         grammar = toGrammar(grammar)
-        yield grammar.parse(indexable(input), 0)
+        self.grammar = grammar.flatten()
+    # TODO Need to think about this class. It's a bit over complicated.
+    # TODO Maybe have separate interactive parser.
+    # A grammar may explicitly specify a terminating EOF explicitly limiting to
+    # a single result.
+    def go(self, input):
+        pos = 0
+        tokens = indexable(input)
+        # this is ugly
+        while (pos==0 or tokens[pos-1].tag != 'EOF') and tokens[pos].tag != 'EOF':
+            result = self.grammar.parse(tokens, pos)
+            if not result:
+                furthestPos = tokens.pos # see indexable
+                token = tokens[pos]
+                raise ParseError(f'Syntax error at {token}, line={token.line}, column={token.column}', token)
+            value, pos = result
+            yield value
 
 def toGrammar(g):
     if isinstance(g, Grammar): return g
     if isinstance(g, str): return Match(g)
-    if hasattr(g, '__iter__'): return Concat(*g)
+    if hasattr(g, '__iter__'):
+        g=list(g)
+        if len(g)==1: return g[0]
+        else: return Concat(*g)
     raise ValueError(g)
 
 class Grammar:
@@ -26,6 +55,8 @@ class Grammar:
         return Exp(self, toGrammar(other))
     def __or__(self, other):
         return Alt(self, toGrammar(other))
+    def __and__(self, checkFn):
+        return Check(self, checkFn)
     def __getitem__(self, item):
         if type(item) == int:
             return Rep(self, item, item)
@@ -35,6 +66,7 @@ class Grammar:
         return self.__str__()
     def __str__(self):
         return str(self.__class__.__name__) + ":" + str(self.__dict__)
+
 def flattenGrammar(self):
     r = copy(self)
     r.grammar = self.grammar.flatten()
@@ -44,22 +76,23 @@ def flattenGrammars(self):
     for grammar in self.grammars:
         grammar = grammar.flatten()
         if isinstance(grammar, type(self)):
-            grammars += list(self.grammars)
+            grammars += list(grammar.grammars)
         else: grammars.append(grammar)
     r = copy(self)
     r.grammars = grammars
-    return self
+    return r
 
-# match token value and tag
-# -- don't really need this since reserved words/ops have value==tag
-@attr.s
+# match token value (not tag)
 class Match(Grammar):
-    value = attr.ib()
+    def __init__(self, value):
+        self.value = value
     def parse(self, tokens, pos):
         token = tokens[pos]
         if token.value == self.value:
             return Result(token, pos + 1)
     def flatten(self): return self
+    def __str__(self):
+        return f'{self.__class__.__name__}({self.value})'
 
 class Tag(Grammar):
     def __init__(self, tag):
@@ -70,7 +103,29 @@ class Tag(Grammar):
             return Result(token, pos + 1)
     def flatten(self): return self
     def __str__(self):
-        return f'{self.__class__.__name__}({self.tag!r})'
+        return f'{self.__class__.__name__}({self.tag})'
+
+class AnyToken(Grammar):
+    """For error handling, doesn't match EOF"""
+    def parse(self, tokens, pos):
+        token = tokens[pos]
+        if token.tag != 'EOF':
+            return Result(token, pos + 1)
+    def flatten(self): return self
+    def __str__(self):
+        return f'{self.__class__.__name__}()'
+
+class Check(Grammar):
+    def __init__(self, grammar, s):
+        self.grammar = grammar
+        self.s = s
+        self.fn = fn(s)
+    def parse(self, tokens, pos):
+        result = self.grammar.parse(tokens, pos)
+        return result and self.fn(result.value) and result
+    def flatten(self): return self
+    def __str__(self):
+        return f'{self.__class__.__name__}({self.s})'
 
 class Concat(Grammar):
     def __init__(self, *gs):
@@ -113,6 +168,17 @@ class Opt(Grammar):
     def __str__(self):
         return f'{self.__class__.__name__}({self.grammar})'
 
+class Not(Grammar):
+    def __init__(self, grammar):
+        self.grammar = grammar
+    def parse(self, tokens, pos):
+        result = self.grammar.parse(tokens, pos)
+        if not result:
+            return Result(None, pos)
+    flatten = flattenGrammar
+    def __str__(self):
+        return f'{self.__class__.__name__}({self.grammar})'
+
 class Rep(Grammar):
     def __init__(self, grammar, start=None, stop=None):
         self.grammar = grammar
@@ -150,6 +216,7 @@ class Rep(Grammar):
         return f'{self.__class__.__name__}({self.grammar})[{self.start}:{self.stop}]'
 
 class List(Grammar):
+    # Not pure: doesn't keep sep
     def __init__(self, g, sep):
         self.grammar = toGrammar(g)
         self.sep = toGrammar(sep)
@@ -157,12 +224,13 @@ class List(Grammar):
         value_list = []
         sep_list = []
         while True:
-            result = grammar.parse(tokens, pos)
+            # work out exact semantics... currently allows trailing sep
+            result = self.grammar.parse(tokens, pos)
             if not result:
-                return None
+                break
             value, pos = result
             value_list.append(value)
-            sep_result = sep.parse(tokens, pos)
+            sep_result = self.sep.parse(tokens, pos)
             if not sep_result:
                 break
             sep_value, pos = sep_result
@@ -186,7 +254,7 @@ class Rule(Grammar):
         self.flattened = False
         self.name = name
         if g: self.grammar = toGrammar(g)
-        if not make: self.make = collections.namedtuple(name, ['value'])
+        if not make: self.make = taggedtuple(name, ['value'])
     #def make(self, value):
         #print(self.name,":",value)
     def __call__(self, *gs, make=None):
