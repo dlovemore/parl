@@ -42,10 +42,9 @@ class Parser(itpipe.Machine):
 def toGrammar(g):
     if isinstance(g, Grammar): return g
     if isinstance(g, str): return Match(g)
-    if hasattr(g, '__iter__'):
-        g=list(g)
-        if len(g)==1: return g[0]
-        else: return Concat(*g)
+    #if hasattr(g, '__iter__'):
+        #g=list(g)
+        #return Concat(*g)
     raise ValueError(g)
 
 class Grammar:
@@ -251,13 +250,21 @@ class Forward(Grammar):
 
 class Rule(Grammar):
     def __init__(self, name, g=None, make=None):
+        """
+A Rule achieves multiple things. It names a grammar; creates a make method;
+allows recursion, and prevents flattening happening through the Rule.
+make if specified is used to construct return value.
+"""
         self.flattened = False
         self.name = name
-        if g: self.grammar = toGrammar(g)
-        if not make: make = taggedtuple(name, ['value'])
+        if g:
+            self.grammar = toGrammar(g)
+            if not make: make = taggedtuple(name, ['value'])
         self.make = make
     def __call__(self, *gs, make=None):
-        self.grammar = toGrammar(gs)
+        gs = list(gs)
+        self.grammar = Concat(*gs)
+        if make: self.make = make
         return self
     def parse(self, tokens, pos):
         result = self.grammar.parse(tokens, pos)
@@ -269,6 +276,20 @@ class Rule(Grammar):
         if not self.flattened:  # use decorator?
             self.flattened = True
             self.grammar = self.grammar.flatten()
+        # Why is this so ugly?
+        make = None
+        if isinstance(self.grammar, Concat):
+            gs = self.grammar.grammars
+            names = [getattr(g, 'name', '_'+str(i)) for i, g in enumerate(gs)]
+            if len(gs)==1 and names[0]=='_0':
+                names=['value']
+            tt = taggedtuple(self.name, names)
+            make = lambda value: tt(*value)
+        else:
+            names = [getattr(self.grammar, 'name', 'value')]
+            gs = list(self.grammar)
+            if not make: make = taggedtuple(name, names)
+        self.make = make or self.make
         return self
     def __str__(self):
         return f'{self.__class__.__name__}({self.name!r},{self.grammar})'
