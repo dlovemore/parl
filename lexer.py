@@ -36,8 +36,8 @@ Interim Lexer, requires spaces except for sep_chars.
         ]
         tok_regex = '|'.join('(?P<%s>%s)' % pair for pair in token_specification)
         # TODO compile re ?
-        line_num = 1 # starting line num at 1 are insane - use 0 internally?
-        for line in input:
+        # starting line_num at 1 is insane - use 0 internally?
+        for line_num, line in enumerate(input, start=1):
             line_start = 0
             for mo in re.finditer(tok_regex, line):
                 tag = mo.lastgroup
@@ -52,5 +52,4 @@ Interim Lexer, requires spaces except for sep_chars.
                     tag = value
                 column = mo.start()
                 yield Token(tag, value, line_num, column)
-            line_num += 1
         yield Token('EOF', '', line_num, 0) # sentinel: simplifies parsing
