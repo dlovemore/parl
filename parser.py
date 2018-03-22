@@ -42,9 +42,6 @@ class Parser(itpipe.Machine):
 def toGrammar(g):
     if isinstance(g, Grammar): return g
     if isinstance(g, str): return Match(g)
-    #if hasattr(g, '__iter__'):
-        #g=list(g)
-        #return Concat(*g)
     raise ValueError(g)
 
 class Grammar:
@@ -52,9 +49,10 @@ class Grammar:
 Use g0+g1 for concatenation. See Concat.
 Use g*separator for lists. See List.
 Use g0 | g1 for alternation. See Alt.
-Use g['name'] to set node name used as attribute name on parse node.
+Use g['name'] to set node name. See Named.
     Default node for repeats is g.node+'s'
-Use g[start:stop] (slice notation) for repeats. See Rep
+Use g[start:stop] (slice notation) for repeats. See Rep. Experimental.
+Use g*n for n repeats. See Rep. Experimental.
 Use Match(value) to match token.value, or mostly just a string.
 Use Tag(tag) to match token.tag.
 Use g & validateFn to validate parse result. Experimental.
@@ -64,6 +62,8 @@ Use g & validateFn to validate parse result. Experimental.
     def __add__(self, other):
         return Concat(self, toGrammar(other))
     def __mul__(self, other):
+        if isinstance(other, int):
+            return Rep(self, start=other, stop=other)
         return List(self, toGrammar(other))
     def __or__(self, other):
         return Alt(self, toGrammar(other))
@@ -71,13 +71,13 @@ Use g & validateFn to validate parse result. Experimental.
         return Check(self, checkFn)
     def __getitem__(self, item):
         if type(item) == int:
-            return Rep(self, item, item)
-        elif isinstance(item, islice):
+            # will be used for position in constructor
+            return Named(self, position=item)
+        elif isinstance(item, slice):
             assert(not item.step)
             return Rep(self, item.start, item.stop)
         elif isinstance(item, str):
-            self.node = item
-            return self
+            return Named(self, node=item)
         else: raise IndexError
     def flatten(self):
         raise NotImplementedError
@@ -176,6 +176,20 @@ class Alt(Grammar):
     def __str__(self):
         return f'{self.__class__.__name__}({self.grammars})'
 
+class Named(Grammar):
+    """Tags grammar with name used as attribute name."""
+    # node is still not a good name, attr maybe, cons maybe?
+    def __init__(self, grammar, node=None, plural=None, position=None):
+        self.grammar = grammar
+        self.node = node
+        self.plural = plural
+        if position: raise NotImplementedError
+    def parse(self, tokens, pos):
+        return self.grammar.parse(tokens, pos)
+    flatten = flattenGrammar
+    def __str__(self):
+        return f'{self.grammar}[{self.node!r}]'
+
 class Opt(Grammar):
     def __init__(self, grammar):
         self.grammar = grammar
@@ -225,7 +239,8 @@ class Rep(Grammar):
     def flatten(self):
         r = flattenGrammar(self)
         if not getattr(self, 'node', None):
-            node = getattr(r, 'node', None)
+            node = getattr(r.grammar, 'node', None)
+            # could take pluralize function
             r.node = node and node+'s'
         return r
     def __str__(self):
@@ -254,8 +269,10 @@ class List(Grammar):
         return Result(value_list, pos)
     def flatten(self):
         r = flattenGrammar(self)
+        # TODO reduce duplicated code!
         if not getattr(self, 'node', None):
-            node = getattr(r, 'node', None)
+            node = getattr(r.grammar, 'node', None)
+            # flattenGrammar makes a copy so following is safe.
             r.node = node and node+'s'
         return r
     def __str__(self):
@@ -278,7 +295,7 @@ allows recursion, and prevents flattening happening through the Rule.
 make if specified is used to construct return value.
 """
 # Should separarte various uses into seperate classes.
-# TODO should probably have make on every node
+# TODO should probably have make on every grammar
         self.flattened = False
         self.name = name
         self.node = name
@@ -309,13 +326,13 @@ make if specified is used to construct return value.
             names = [getattr(g, 'node', None) for g in gs]
             if len(gs)==1 and not names[0]:
                 names=['value']
-                # Allow invisible node.
+                # Allow invisible grammar.
                 # The problem here is Rule is trying to do too many things
-                # including preventing recursion and naming a node.
+                # including preventing recursion and naming a grammar.
                 # sometimes we only want to prevent recursion.
                 # Of course the user could specify this, but then we lose
                 # information about intent.
-                if not self.name: make = lambda value: value
+                if not self.node: make = lambda value: value
             names = [name or f'_{i}' for i, name in enumerate(names)]
             tt = taggedtuple(self.name, names)
             self.make = lambda value: tt(*value)

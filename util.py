@@ -4,6 +4,7 @@ def taggedtuple(tag, names=None):
     def initial_dict(names):
         d=dict(__new__=_new_, __init__=_init_, __repr__=_repr_, _tag=tag)
         if names:
+            assert(len(names)==len(set(names)))
             for (i, name) in enumerate(names):
                 if name:
                     d[name] = property((lambda i: lambda self: self[i])(i))
