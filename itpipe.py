@@ -167,10 +167,6 @@ class Arg(Machine):
     def run(self, input, f):
         return f(input)
 
-class Apply(Machine):
-    def run(self, input, f):
-        return f(*input)
-
 class Map(Machine):
     def run(self, input, f):
         if type(f)==str:
