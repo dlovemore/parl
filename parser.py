@@ -48,10 +48,23 @@ def toGrammar(g):
     raise ValueError(g)
 
 class Grammar:
+    """
+Use g0+g1 for concatenation. See Concat.
+Use g*separator for lists. See List.
+Use g0 | g1 for alternation. See Alt.
+Use g['name'] to set node name used as attribute name on parse node.
+    Default node for repeats is g.node+'s'
+Use g[start:stop] (slice notation) for repeats. See Rep
+Use Match(value) to match token.value, or mostly just a string.
+Use Tag(tag) to match token.tag.
+Use g & validateFn to validate parse result. Experimental.
+"""
+    # TODO should probably have make on every node
+    # or maybe add make dict on parser.
     def __add__(self, other):
         return Concat(self, toGrammar(other))
     def __mul__(self, other):
-        return Exp(self, toGrammar(other))
+        return List(self, toGrammar(other))
     def __or__(self, other):
         return Alt(self, toGrammar(other))
     def __and__(self, checkFn):
@@ -59,13 +72,21 @@ class Grammar:
     def __getitem__(self, item):
         if type(item) == int:
             return Rep(self, item, item)
-        assert(not item.step)
-        return Rep(self, item.start, item.stop)
+        elif isinstance(item, islice):
+            assert(not item.step)
+            return Rep(self, item.start, item.stop)
+        elif isinstance(item, str):
+            self.node = item
+            return self
+        else: raise IndexError
+    def flatten(self):
+        raise NotImplementedError
     def __repr__(self):
         return self.__str__()
     def __str__(self):
         return str(self.__class__.__name__) + ":" + str(self.__dict__)
 
+# flatten is now doing more than flatten, rename or refactor.
 def flattenGrammar(self):
     r = copy(self)
     r.grammar = self.grammar.flatten()
@@ -201,21 +222,17 @@ class Rep(Grammar):
             value_list.append(value)
             i+=1
         return Result(value_list, pos)
-    def __getitem__(self, item):
-        # a bit unnecessary, but avoiding confusion when
-        # writing Rep(G)[:3] instead of G[:3]
-        # should probably remove.
-        assert(self.start == 0 and not self.stop)
-        if type(item) == int:
-            item = slice(item,item)
-        assert(not item.step)
-        return Rep(self.grammar, item.start, item.stop)
-    flatten = flattenGrammar
+    def flatten(self):
+        r = flattenGrammar(self)
+        if not getattr(self, 'node', None):
+            node = getattr(r, 'node', None)
+            r.node = node and node+'s'
+        return r
     def __str__(self):
         return f'{self.__class__.__name__}({self.grammar})[{self.start}:{self.stop}]'
 
 class List(Grammar):
-    # Not pure: doesn't keep sep
+    # Not pure: doesn't keep sep. TODO fix?
     def __init__(self, g, sep):
         self.grammar = toGrammar(g)
         self.sep = toGrammar(sep)
@@ -233,9 +250,14 @@ class List(Grammar):
             if not sep_result:
                 break
             sep_value, pos = sep_result
-            sep_list.append(value)
+            sep_list.append(sep_value)
         return Result(value_list, pos)
-    flatten = flattenGrammar
+    def flatten(self):
+        r = flattenGrammar(self)
+        if not getattr(self, 'node', None):
+            node = getattr(r, 'node', None)
+            r.node = node and node+'s'
+        return r
     def __str__(self):
         return f'{self.__class__.__name__}({self.grammar},{self.sep})'
 
@@ -255,11 +277,13 @@ A Rule achieves multiple things. It names a grammar; creates a make method;
 allows recursion, and prevents flattening happening through the Rule.
 make if specified is used to construct return value.
 """
+# Should separarte various uses into seperate classes.
+# TODO should probably have make on every node
         self.flattened = False
         self.name = name
+        self.node = name
         if g:
             self.grammar = toGrammar(g)
-            if not make: make = taggedtuple(name, ['value'])
         self.make = make
     def __call__(self, *gs, make=None):
         gs = list(gs)
@@ -282,9 +306,17 @@ make if specified is used to construct return value.
                 gs = self.grammar.grammars
             else:
                 gs = list(self.grammar)
-            names = [getattr(g, 'name', '_'+str(i)) for i, g in enumerate(gs)]
-            if len(gs)==1 and names[0]=='_0':
+            names = [getattr(g, 'node', None) for g in gs]
+            if len(gs)==1 and not names[0]:
                 names=['value']
+                # Allow invisible node.
+                # The problem here is Rule is trying to do too many things
+                # including preventing recursion and naming a node.
+                # sometimes we only want to prevent recursion.
+                # Of course the user could specify this, but then we lose
+                # information about intent.
+                if not self.name: make = lambda value: value
+            names = [name or f'_{i}' for i, name in enumerate(names)]
             tt = taggedtuple(self.name, names)
             self.make = lambda value: tt(*value)
         return self
