@@ -277,19 +277,16 @@ make if specified is used to construct return value.
             self.flattened = True
             self.grammar = self.grammar.flatten()
         # Why is this so ugly?
-        make = None
-        if isinstance(self.grammar, Concat):
-            gs = self.grammar.grammars
+        if not self.make:
+            if isinstance(self.grammar, Concat):
+                gs = self.grammar.grammars
+            else:
+                gs = list(self.grammar)
             names = [getattr(g, 'name', '_'+str(i)) for i, g in enumerate(gs)]
             if len(gs)==1 and names[0]=='_0':
                 names=['value']
             tt = taggedtuple(self.name, names)
-            make = lambda value: tt(*value)
-        else:
-            names = [getattr(self.grammar, 'name', 'value')]
-            gs = list(self.grammar)
-            if not make: make = taggedtuple(name, names)
-        self.make = make or self.make
+            self.make = lambda value: tt(*value)
         return self
     def __str__(self):
         return f'{self.__class__.__name__}({self.name!r},{self.grammar})'
