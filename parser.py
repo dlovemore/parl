@@ -19,7 +19,7 @@ class Parser(itpipe.Machine):
 """
     def __init__(self, grammar):
         grammar = toGrammar(grammar)
-        grammar = grammar.flatten()
+        grammar = grammar.flatten() # maybe should be compile...
         super().__init__(grammar)
     # TODO Need to think about this class. It's a bit over complicated.
     # TODO Maybe have separate interactive parser.
@@ -79,14 +79,27 @@ Use g & validateFn to validate parse result. Experimental.
         elif isinstance(item, str):
             return Named(self, node=item)
         else: raise IndexError
+    def fixUpPlural(g): pass
     def flatten(self):
         raise NotImplementedError
+    def map(self, f, context):
+        self.flatten()
+        self.flattenProperly()
+        pass
     def __repr__(self):
         return self.__str__()
     def __str__(self):
         return str(self.__class__.__name__) + ":" + str(self.__dict__)
 
-# flatten is now doing more than flatten, rename or refactor.
+def plural(word):
+    return word and word+'s'
+def fixUpPlural(g):
+    print("fixUp", g, g.grammar)
+    if not getattr(g, 'node', None):
+        node = getattr(g.grammar, 'node', None)
+        print("fixUp node=", node)
+        g.node = plural(node)
+# flatten is now doing more than flatten: rename or refactor.
 def flattenGrammar(self):
     r = copy(self)
     r.grammar = self.grammar.flatten()
@@ -177,8 +190,8 @@ class Alt(Grammar):
         return f'{self.__class__.__name__}({self.grammars})'
 
 class Named(Grammar):
-    """Tags grammar with name used as attribute name."""
-    # node is still not a good name, attr maybe, cons maybe?
+    """Tags grammar with name used as attribute name for parent parse node."""
+    # node is still not a good name, attr maybe, cons maybe, tag, field?
     def __init__(self, grammar, node=None, plural=None, position=None):
         self.grammar = grammar
         self.node = node
@@ -236,12 +249,10 @@ class Rep(Grammar):
             value_list.append(value)
             i+=1
         return Result(value_list, pos)
+    fixUpPlural = fixUpPlural
     def flatten(self):
         r = flattenGrammar(self)
-        if not getattr(self, 'node', None):
-            node = getattr(r.grammar, 'node', None)
-            # could take pluralize function
-            r.node = node and node+'s'
+        r.fixUpPlural()
         return r
     def __str__(self):
         return f'{self.__class__.__name__}({self.grammar})[{self.start}:{self.stop}]'
@@ -267,13 +278,11 @@ class List(Grammar):
             sep_value, pos = sep_result
             sep_list.append(sep_value)
         return Result(value_list, pos)
+    fixUpPlural = fixUpPlural
     def flatten(self):
         r = flattenGrammar(self)
-        # TODO reduce duplicated code!
-        if not getattr(self, 'node', None):
-            node = getattr(r.grammar, 'node', None)
-            # flattenGrammar makes a copy so following is safe.
-            r.node = node and node+'s'
+        r.fixUpPlural()
+        print("flatten", r.node)
         return r
     def __str__(self):
         return f'{self.__class__.__name__}({self.grammar},{self.sep})'
@@ -311,31 +320,37 @@ make if specified is used to construct return value.
         result = self.grammar.parse(tokens, pos)
         if result:
             return Result(self.make(result.value), result.pos)
+    def flattenProperly(self, rewriteDict):
+        pass
     def flatten(self):
+        print("Rule.flatten",self.node, getattr(self, 'flattened', None), self.make)
         # TODO not sure how to do this properly
+        # I mean this should copy, but if it copies, then link with original
+        # variable lost. Maybe that is OK.
         # I think flatten needs to pass extra dict around
         if not self.flattened:  # use decorator?
             self.flattened = True
             self.grammar = self.grammar.flatten()
-        # Why is this so ugly?
-        if not self.make:
-            if isinstance(self.grammar, Concat):
-                gs = self.grammar.grammars
-            else:
-                gs = list(self.grammar)
-            names = [getattr(g, 'node', None) for g in gs]
-            if len(gs)==1 and not names[0]:
-                names=['value']
-                # Allow invisible grammar.
-                # The problem here is Rule is trying to do too many things
-                # including preventing recursion and naming a grammar.
-                # sometimes we only want to prevent recursion.
-                # Of course the user could specify this, but then we lose
-                # information about intent.
-                if not self.node: make = lambda value: value
-            names = [name or f'_{i}' for i, name in enumerate(names)]
-            tt = taggedtuple(self.name, names)
-            self.make = lambda value: tt(*value)
+            # Why is this so ugly?
+            if not self.make:
+                if isinstance(self.grammar, Concat):
+                    gs = self.grammar.grammars
+                else:
+                    gs = list(self.grammar)
+                names = [getattr(g, 'node', None) for g in gs]
+                print("Rule.flatten",self.node, names)
+                if len(gs)==1 and not names[0]:
+                    names=['value']
+                    # Allow invisible grammar.
+                    # The problem here is Rule is trying to do too many things
+                    # including preventing recursion and naming a grammar.
+                    # sometimes we only want to prevent recursion.
+                    # Of course the user could specify this, but then we lose
+                    # information about intent.
+                    if not self.node: make = lambda value: value
+                names = [name or f'_{i}' for i, name in enumerate(names)]
+                tt = taggedtuple(self.name, names)
+                self.make = lambda value: tt(*value)
         return self
     def __str__(self):
         return f'{self.__class__.__name__}({self.name!r},{self.grammar})'
