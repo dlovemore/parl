@@ -43,21 +43,23 @@ def toGrammar(g):
     if isinstance(g, Grammar): return g
     if isinstance(g, str): return Match(g)
     raise ValueError(g)
+def toGrammars(gs):
+    return list(map(toGrammar, gs))
 
 class Grammar:
     """
 Use g0+g1 for concatenation. See Concat.
 Use g*separator for lists. See List.
 Use g0 | g1 for alternation. See Alt.
-Use g['name'] to set node name. See Named.
-    Default node for repeats is g.node+'s'
+Use g['name'] to set field name. See Named.
+    Default field for repeats is g.field+'s'
 Use g[start:stop] (slice notation) for repeats. See Rep. Experimental.
 Use g*n for n repeats. See Rep. Experimental.
 Use Match(value) to match token.value, or mostly just a string.
 Use Tag(tag) to match token.tag.
 Use g & validateFn to validate parse result. Experimental.
 """
-    # TODO should probably have make on every node
+    # TODO should probably have make on every grammar
     # or maybe add make dict on parser.
     def __add__(self, other):
         return Concat(self, toGrammar(other))
@@ -77,15 +79,17 @@ Use g & validateFn to validate parse result. Experimental.
             assert(not item.step)
             return Rep(self, item.start, item.stop)
         elif isinstance(item, str):
-            return Named(self, node=item)
+            return Named(self, field=item)
         else: raise IndexError
-    def fixUpPlural(g): pass
     def flatten(self):
         raise NotImplementedError
-    def map(self, f, context):
-        self.flatten()
-        self.flattenProperly()
-        pass
+    def __iter__(self):
+        raise NotImplementedError("Instances should list subgrammars")
+    def flattenShallow(self, g, cs):
+        """Flatten this grammar so that all binary relations become lists.
+This also fixes up grammar fields."""
+        assert(not cs)
+        return self
     def __repr__(self):
         return self.__str__()
     def __str__(self):
@@ -93,28 +97,32 @@ Use g & validateFn to validate parse result. Experimental.
 
 def plural(word):
     return word and word+'s'
-def fixUpPlural(g):
-    if not getattr(g, 'node', None):
-        node = getattr(g.grammar, 'node', None)
-        g.node = plural(node)
 # flatten is now doing more than flatten: rename or refactor.
-def flattenGrammar(self):
-    r = copy(self)
-    r.grammar = self.grammar.flatten()
-    return r
-def flattenGrammars(self):
-    grammars = []
-    for grammar in self.grammars:
-        grammar = grammar.flatten()
-        if isinstance(grammar, type(self)):
-            grammars += list(grammar.grammars)
-        else: grammars.append(grammar)
-    r = copy(self)
-    r.grammars = grammars
-    return r
+
+class WithNoSubGrammar(Grammar):
+    def flatten(self): return self
+
+class WithSubGrammar(Grammar):
+    def flatten(self):
+        r = copy(self)
+        r.grammar = self.grammar.flatten()
+        return r
+
+class WithSubGrammars(Grammar):
+    def flatten(self):
+        grammars = []
+        for grammar in self.grammars:
+            grammar = grammar.flatten()
+            if isinstance(grammar, type(self)):
+                grammars += list(grammar.grammars)
+            else:
+                grammars.append(grammar)
+        r = copy(self)
+        r.grammars = grammars
+        return r
 
 # match token value (not tag)
-class Match(Grammar):
+class Match(WithNoSubGrammar):
     def __init__(self, value):
         self.value = value
     def parse(self, tokens, pos):
@@ -125,18 +133,17 @@ class Match(Grammar):
     def __str__(self):
         return f'{self.__class__.__name__}({self.value})'
 
-class Tag(Grammar):
+class Tag(WithNoSubGrammar):
     def __init__(self, tag):
         self.tag = tag
     def parse(self, tokens, pos):
         token = tokens[pos]
         if token.tag == self.tag: #optimise == to is?
             return Result(token, pos + 1)
-    def flatten(self): return self
     def __str__(self):
         return f'{self.__class__.__name__}({self.tag})'
 
-class AnyToken(Grammar):
+class AnyToken(WithNoSubGrammar):
     """For error handling, doesn't match EOF"""
     def parse(self, tokens, pos):
         token = tokens[pos]
@@ -146,7 +153,7 @@ class AnyToken(Grammar):
     def __str__(self):
         return f'{self.__class__.__name__}()'
 
-class Check(Grammar):
+class Check(WithSubGrammar):
     def __init__(self, grammar, s):
         self.grammar = grammar
         self.s = s
@@ -154,13 +161,12 @@ class Check(Grammar):
     def parse(self, tokens, pos):
         result = self.grammar.parse(tokens, pos)
         return result and self.fn(result.value) and result
-    def flatten(self): return self
     def __str__(self):
         return f'{self.__class__.__name__}({self.s})'
 
-class Concat(Grammar):
+class Concat(WithSubGrammars):
     def __init__(self, *gs):
-        self.grammars = list(map(toGrammar, gs))
+        self.grammars = toGrammars(gs)
     def parse(self, tokens, pos):
         value_list = []
         for grammar in self.grammars:
@@ -171,37 +177,34 @@ class Concat(Grammar):
             value_list.append(value)
         if value_list:
             return Result(value_list, pos)
-    flatten = flattenGrammars
     def __str__(self):
         return f'{self.__class__.__name__}({self.grammars})'
 
-class Alt(Grammar):
+class Alt(WithSubGrammars):
     def __init__(self, *gs):
-        self.grammars = list(map(toGrammar, gs))
+        self.grammars = toGrammars(gs)
     def parse(self, tokens, pos):
         for grammar in self.grammars:
             result = grammar.parse(tokens, pos)
             if result:
                 return result
-    flatten = flattenGrammars
     def __str__(self):
         return f'{self.__class__.__name__}({self.grammars})'
 
-class Named(Grammar):
-    """Tags grammar with name used as attribute name for parent parse node."""
-    # node is still not a good name, attr maybe, cons maybe, tag, field?
-    def __init__(self, grammar, node=None, plural=None, position=None):
+class Named(WithSubGrammar):
+    """Tags grammar with name used as attribute name for parent grammar."""
+    # field is still not a good name, attr maybe, cons maybe, tag, field?
+    def __init__(self, grammar, field=None, plural=None, position=None):
         self.grammar = grammar
-        self.node = node
+        self.field = field
         self.plural = plural
         if position: raise NotImplementedError
     def parse(self, tokens, pos):
         return self.grammar.parse(tokens, pos)
-    flatten = flattenGrammar
     def __str__(self):
-        return f'{self.grammar}[{self.node!r}]'
+        return f'{self.grammar}[{self.field!r}]'
 
-class Opt(Grammar):
+class Opt(WithSubGrammar):
     def __init__(self, grammar):
         self.grammar = grammar
     def parse(self, tokens, pos):
@@ -209,22 +212,22 @@ class Opt(Grammar):
         if result:
             return Result([result.value], result.pos)
         return Result(None, pos)
-    flatten = flattenGrammar
     def __str__(self):
         return f'{self.__class__.__name__}({self.grammar})'
 
-class Not(Grammar):
+class Not(WithSubGrammar):
     def __init__(self, grammar):
         self.grammar = grammar
     def parse(self, tokens, pos):
         result = self.grammar.parse(tokens, pos)
         if not result:
             return Result(None, pos)
-    flatten = flattenGrammar
     def __str__(self):
         return f'{self.__class__.__name__}({self.grammar})'
 
-class Rep(Grammar):
+class Rep(WithSubGrammar):
+    """Allows between start and stop repetitions."""
+    # Is stop really needed?
     def __init__(self, grammar, start=None, stop=None):
         self.grammar = grammar
         self.start = start or 0
@@ -247,53 +250,63 @@ class Rep(Grammar):
             value_list.append(value)
             i+=1
         return Result(value_list, pos)
-    fixUpPlural = fixUpPlural
     def flatten(self):
-        r = flattenGrammar(self)
-        r.fixUpPlural()
+        r = copy(self)
+        r = super().flatten()
+        if not getattr(r, 'field', None):
+            field = getattr(r.grammar, 'field', None)
+            r.field = plural(field)
         return r
     def __str__(self):
         return f'{self.__class__.__name__}({self.grammar})[{self.start}:{self.stop}]'
 
-class List(Grammar):
+class List(WithSubGrammars):
     # Not pure: doesn't keep sep. TODO fix?
     def __init__(self, g, sep):
-        self.grammar = toGrammar(g)
-        self.sep = toGrammar(sep)
+        self.grammars = toGrammars([g, sep])
     def parse(self, tokens, pos):
         value_list = []
         sep_list = []
+        grammar , sep = self.grammars
         while True:
             # work out exact semantics... currently allows trailing sep
-            result = self.grammar.parse(tokens, pos)
+            result = grammar.parse(tokens, pos)
             if not result:
                 break
             value, pos = result
             value_list.append(value)
-            sep_result = self.sep.parse(tokens, pos)
+            sep_result = sep.parse(tokens, pos)
             if not sep_result:
                 break
             sep_value, pos = sep_result
             sep_list.append(sep_value)
         return Result(value_list, pos)
-    fixUpPlural = fixUpPlural
     def flatten(self):
-        r = flattenGrammar(self)
-        r.fixUpPlural()
+        r = copy(self)
+        r = super().flatten()
+        if not getattr(r, 'field', None):
+            field = getattr(r.grammars[0], 'field', None)
+            r.field = plural(field)
         return r
+    # TODO fix __str__ methods: don't go through rule.
     def __str__(self):
-        return f'{self.__class__.__name__}({self.grammar},{self.sep})'
+        return f'{self.grammars[0]}*{self.grammars[1]})'
 
-class Forward(Grammar):
+class Forward(WithSubGrammar):
     def __init__(self):
         self.grammar = None
+    def __call__(self, *gs):
+        if len(gs)==1:
+            self.grammar = toGrammar(*gs)
+        else:
+            self.grammar = Concat(*gs)
     def parse(self, tokens, pos):
         return self.grammar(tokens, pos)
     def flatten(self): return self.grammar
     def __str__(self):
         return f'{self.__class__.__name__}({self.grammar})'
 
-class Rule(Grammar):
+class Rule(WithSubGrammar):
     def __init__(self, name, g=None, make=None):
         """
 A Rule achieves multiple things. It names a grammar; creates a make method;
@@ -304,7 +317,7 @@ make if specified is used to construct return value.
 # TODO should probably have make on every grammar
         self.flattened = False
         self.name = name
-        self.node = name
+        self.field = name
         if g:
             self.grammar = toGrammar(g)
         self.make = make
@@ -317,13 +330,7 @@ make if specified is used to construct return value.
         result = self.grammar.parse(tokens, pos)
         if result:
             return Result(self.make(result.value), result.pos)
-    def flattenProperly(self, rewriteDict):
-        pass
     def flatten(self):
-        # TODO not sure how to do this properly
-        # I mean this should copy, but if it copies, then link with original
-        # variable lost. Maybe that is OK.
-        # I think flatten needs to pass extra dict around
         if not self.flattened:  # use decorator?
             self.flattened = True
             self.grammar = self.grammar.flatten()
@@ -333,7 +340,7 @@ make if specified is used to construct return value.
                     gs = self.grammar.grammars
                 else:
                     gs = list(self.grammar)
-                names = [getattr(g, 'node', None) for g in gs]
+                names = [getattr(g, 'field', None) for g in gs]
                 if len(gs)==1 and not names[0]:
                     names=['value']
                     # Allow invisible grammar.
@@ -342,8 +349,8 @@ make if specified is used to construct return value.
                     # sometimes we only want to prevent recursion.
                     # Of course the user could specify this, but then we lose
                     # information about intent.
-                    if not self.node: make = lambda value: value
-                names = [name or f'_{i}' for i, name in enumerate(names)]
+                    if not self.field: make = lambda value: value
+                #names = [name or f'_{i}' for i, name in enumerate(names)]
                 tt = taggedtuple(self.name, names)
                 self.make = lambda value: tt(*value)
         return self
