@@ -1,6 +1,6 @@
 from parl import itpipe
 from parl.itpipe import indexable, IndexableOutput
-from parl.util import taggedtuple
+from parl.util import taggedtuple, dfsVisit
 from parl.fn import fn
 from copy import copy
 import collections
@@ -83,7 +83,7 @@ Use g & validateFn to validate parse result. Experimental.
         else: raise IndexError
     def flatten(self):
         raise NotImplementedError
-    def __iter__(self):
+    def subGrammars(self):
         raise NotImplementedError("Instances should list subgrammars")
     def flattenShallow(self, g, cs):
         """Flatten this grammar so that all binary relations become lists.
@@ -91,24 +91,45 @@ This also fixes up grammar fields."""
         assert(not cs)
         return self
     def __repr__(self):
-        return self.__str__()
-    def __str__(self):
         return str(self.__class__.__name__) + ":" + str(self.__dict__)
+    def myreprRecurse(self):
+        return None
+    def __repr__(self):
+        d={}
+        def visit(n, cs):
+            d[n] = n.myrepr(cs)
+            return d[n]
+        def children(n):
+            return n.subGrammars()
+        def recurse(n):
+            return self.myreprRecurse() or d[n]
+        return dfsVisit(self, visit, children, recurse)
 
 def plural(word):
     return word and word+'s'
 # flatten is now doing more than flatten: rename or refactor.
 
 class WithNoSubGrammar(Grammar):
+    def subGrammars(self):
+        return ()
     def flatten(self): return self
+    def myrepr(self, cs):
+        return f'{self.__class__.__name__} + ":" + str(self.__dict__)'
 
 class WithSubGrammar(Grammar):
+    def subGrammars(self):
+        yield self.grammar
     def flatten(self):
         r = copy(self)
         r.grammar = self.grammar.flatten()
         return r
+    def myrepr(self, cs):
+        cs = ", ".join(cs)
+        return f'{self.__class__.__name__}(cs)'
 
 class WithSubGrammars(Grammar):
+    def subGrammars(self):
+        return self.grammars
     def flatten(self):
         grammars = []
         for grammar in self.grammars:
@@ -120,6 +141,9 @@ class WithSubGrammars(Grammar):
         r = copy(self)
         r.grammars = grammars
         return r
+    def myrepr(self, cs):
+        cs = ", ".join(cs)
+        return f'{self.__class__.__name__}(cs)'
 
 # match token value (not tag)
 class Match(WithNoSubGrammar):
@@ -130,8 +154,12 @@ class Match(WithNoSubGrammar):
         if token.value == self.value:
             return Result(token, pos + 1)
     def flatten(self): return self
-    def __str__(self):
+    def myreprLhs(self, cs):
         return f'{self.__class__.__name__}({self.value})'
+    def myreprRhs(self, cs):
+        repr(self.value)
+    def myrepr(self, cs):
+        return repr(self.value)
 
 class Tag(WithNoSubGrammar):
     def __init__(self, tag):
@@ -140,8 +168,8 @@ class Tag(WithNoSubGrammar):
         token = tokens[pos]
         if token.tag == self.tag: #optimise == to is?
             return Result(token, pos + 1)
-    def __str__(self):
-        return f'{self.__class__.__name__}({self.tag})'
+    def myrepr(self, cs):
+        return f'{self.__class__.__name__}({self.tag!r})'
 
 class AnyToken(WithNoSubGrammar):
     """For error handling, doesn't match EOF"""
@@ -150,19 +178,19 @@ class AnyToken(WithNoSubGrammar):
         if token.tag != 'EOF':
             return Result(token, pos + 1)
     def flatten(self): return self
-    def __str__(self):
+    def myrepr(self, cs):
         return f'{self.__class__.__name__}()'
 
 class Check(WithSubGrammar):
-    def __init__(self, grammar, s):
+    def __init__(self, grammar, f):
         self.grammar = grammar
-        self.s = s
-        self.fn = fn(s)
+        self.f = f
+        self.fn = fn(f)
     def parse(self, tokens, pos):
         result = self.grammar.parse(tokens, pos)
         return result and self.fn(result.value) and result
-    def __str__(self):
-        return f'{self.__class__.__name__}({self.s})'
+    def myrepr(self, cs):
+        return f'{self.f!r}&{f}'
 
 class Concat(WithSubGrammars):
     def __init__(self, *gs):
@@ -177,8 +205,8 @@ class Concat(WithSubGrammars):
             value_list.append(value)
         if value_list:
             return Result(value_list, pos)
-    def __str__(self):
-        return f'{self.__class__.__name__}({self.grammars})'
+    def myrepr(self, cs):
+        return "+".join(cs)
 
 class Alt(WithSubGrammars):
     def __init__(self, *gs):
@@ -188,8 +216,8 @@ class Alt(WithSubGrammars):
             result = grammar.parse(tokens, pos)
             if result:
                 return result
-    def __str__(self):
-        return f'{self.__class__.__name__}({self.grammars})'
+    def myrepr(self, cs):
+        return "|".join(cs)
 
 class Named(WithSubGrammar):
     """Tags grammar with name used as attribute name for parent grammar."""
@@ -201,8 +229,8 @@ class Named(WithSubGrammar):
         if position: raise NotImplementedError
     def parse(self, tokens, pos):
         return self.grammar.parse(tokens, pos)
-    def __str__(self):
-        return f'{self.grammar}[{self.field!r}]'
+    def myrepr(self, cs):
+        return f'{self.grammar!r}[{self.field!r}]'
 
 class Opt(WithSubGrammar):
     def __init__(self, grammar):
@@ -212,8 +240,8 @@ class Opt(WithSubGrammar):
         if result:
             return Result([result.value], result.pos)
         return Result(None, pos)
-    def __str__(self):
-        return f'{self.__class__.__name__}({self.grammar})'
+    def myrepr(self, cs):
+        return f'{self.__class__.__name__}({", ".join(cs)})'
 
 class Not(WithSubGrammar):
     def __init__(self, grammar):
@@ -222,8 +250,8 @@ class Not(WithSubGrammar):
         result = self.grammar.parse(tokens, pos)
         if not result:
             return Result(None, pos)
-    def __str__(self):
-        return f'{self.__class__.__name__}({self.grammar})'
+    def myrepr(self, cs):
+        return f'{self.__class__.__name__}({", ".join(cs)})'
 
 class Rep(WithSubGrammar):
     """Allows between start and stop repetitions."""
@@ -257,8 +285,9 @@ class Rep(WithSubGrammar):
             field = getattr(r.grammar, 'field', None)
             r.field = plural(field)
         return r
-    def __str__(self):
-        return f'{self.__class__.__name__}({self.grammar})[{self.start}:{self.stop}]'
+    def myrepr(self, cs):
+        post = f'[{self.start}:{self.stop}]' if self.start or self.stop else '' 
+        return f'{self.__class__.__name__}({", ".join(cs)}){post}'
 
 class List(WithSubGrammars):
     # Not pure: doesn't keep sep. TODO fix?
@@ -288,9 +317,8 @@ class List(WithSubGrammars):
             field = getattr(r.grammars[0], 'field', None)
             r.field = plural(field)
         return r
-    # TODO fix __str__ methods: don't go through rule.
-    def __str__(self):
-        return f'{self.grammars[0]}*{self.grammars[1]})'
+    def myrepr(self, cs):
+        return '*'.join(cs)
 
 class Forward(WithSubGrammar):
     def __init__(self):
@@ -303,8 +331,8 @@ class Forward(WithSubGrammar):
     def parse(self, tokens, pos):
         return self.grammar(tokens, pos)
     def flatten(self): return self.grammar
-    def __str__(self):
-        return f'{self.__class__.__name__}({self.grammar})'
+    def myrepr(self, cs):
+        return f'{self.__class__.__name__}({", ".join(cs)})'
 
 class Rule(WithSubGrammar):
     def __init__(self, name, g=None, make=None):
@@ -354,5 +382,7 @@ make if specified is used to construct return value.
                 tt = taggedtuple(self.name, names)
                 self.make = lambda value: tt(*value)
         return self
-    def __str__(self):
-        return f'{self.__class__.__name__}({self.name!r},{self.grammar})'
+    def myreprRecurse(self):
+        return f'{self.name}'
+    def myrepr(self, cs):
+        return f'\n{self.name} = {self.__class__.__name__}({self.name!r})({", ".join(cs)})'

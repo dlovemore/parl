@@ -23,3 +23,19 @@ def taggedtuple(tag, names=None):
         return tag+tuple.__repr__(self)
     return type(tag, (tuple,), initial_dict(names))
 
+def dfsVisit(n, visit, children, recurseVisit=None):
+    """
+Returns visit(n, cs)
+where n is a node in a graph,
+and cs is the result of calling visit on each of children(n).
+if visit is to be called recursively, recurseVisit(n) is called
+instead or None is returned for that node.
+"""
+    d = {}
+    s = set()
+    def dfsVisit1(n):
+        if n in s: return recurseVisit(n) if recurseVisit else None
+        s.add(n)
+        print("dfsVisit1", len(s))
+        return visit(n, [dfsVisit1(c) for c in children(n)])
+    return dfsVisit1(n)
