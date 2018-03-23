@@ -94,10 +94,8 @@ Use g & validateFn to validate parse result. Experimental.
 def plural(word):
     return word and word+'s'
 def fixUpPlural(g):
-    print("fixUp", g, g.grammar)
     if not getattr(g, 'node', None):
         node = getattr(g.grammar, 'node', None)
-        print("fixUp node=", node)
         g.node = plural(node)
 # flatten is now doing more than flatten: rename or refactor.
 def flattenGrammar(self):
@@ -282,7 +280,6 @@ class List(Grammar):
     def flatten(self):
         r = flattenGrammar(self)
         r.fixUpPlural()
-        print("flatten", r.node)
         return r
     def __str__(self):
         return f'{self.__class__.__name__}({self.grammar},{self.sep})'
@@ -323,7 +320,6 @@ make if specified is used to construct return value.
     def flattenProperly(self, rewriteDict):
         pass
     def flatten(self):
-        print("Rule.flatten",self.node, getattr(self, 'flattened', None), self.make)
         # TODO not sure how to do this properly
         # I mean this should copy, but if it copies, then link with original
         # variable lost. Maybe that is OK.
@@ -338,7 +334,6 @@ make if specified is used to construct return value.
                 else:
                     gs = list(self.grammar)
                 names = [getattr(g, 'node', None) for g in gs]
-                print("Rule.flatten",self.node, names)
                 if len(gs)==1 and not names[0]:
                     names=['value']
                     # Allow invisible grammar.
