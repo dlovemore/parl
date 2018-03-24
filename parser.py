@@ -92,22 +92,23 @@ This also fixes up grammar fields."""
         return self
     def myreprRecurse(self):
         return None
-    def myreprPair(self, out, cs):
-        return out, self.myrepr(cs)
+    def myreprOutput(self, pre, cs, post):
+        return pre, self.myrepr(cs), post
     def __repr__(self):
         d={}
-        def visit(g, outcs):
-            out = sum([x[0] for x in outcs if outcs], [])
-            cs = [x[1] for x in outcs if x or None]
-            o, r = g.myreprPair(out, cs)
+        def visit(g, precspost):
+            pre = sum([x[0] for x in precspost if x], [])
+            cs = [x[1] for x in precspost if x or None]
+            post = sum([x[2] for x in precspost if x], [])
+            pre, r, post = g.myreprOutput(pre, cs, post)
             d[g] = r
-            return o, d[g]
+            return pre, r, post
         def children(g):
             return g.subGrammars()
         def recurse1(g):
-            return [], g.myreprRecurse() or d.get(g, None)
-        out, r = dfsVisit(self, visit, children, recurse1)
-        return '\n'.join(out+[r])
+            return [], d.get(g, None) or g.myreprRecurse(), []
+        pre, r, post = dfsVisit(self, visit, children, recurse1)
+        return '\n'.join(pre+post+[r])
 
 def plural(word):
     return word and word+'s'
@@ -151,6 +152,7 @@ class WithSubGrammars(Grammar):
 
 # match token value (not tag)
 class Match(WithNoSubGrammar):
+    """Grammar matching token on value."""
     def __init__(self, value):
         self.value = value
     def parse(self, tokens, pos):
@@ -166,6 +168,7 @@ class Match(WithNoSubGrammar):
         return repr(self.value)
 
 class Tag(WithNoSubGrammar):
+    """Grammar matching token on tag."""
     def __init__(self, tag):
         self.tag = tag
     def parse(self, tokens, pos):
@@ -290,8 +293,10 @@ class Rep(WithSubGrammar):
             r.field = plural(field)
         return r
     def myrepr(self, cs):
-        post = f'[{self.start}:{self.stop}]' if self.start or self.stop else '' 
-        return f'{self.__class__.__name__}({", ".join(cs)}){post}'
+        start = self.start or ""
+        stop = self.stop if self.stop is not None else ""
+        suf = f'[{start}:{stop}]' if start or stop!="" else '' 
+        return f'{self.__class__.__name__}({", ".join(cs)}){suf}'
 
 class List(WithSubGrammars):
     # Not pure: doesn't keep sep. TODO fix?
@@ -388,8 +393,8 @@ make if specified is used to construct return value.
         return self
     def myreprRecurse(self):
         return f'{self.name}'
-    def myreprPair(self, out, cs):
-        out += [f'{self.name} = {self.__class__.__name__}({self.name!r})', 
-                f'{self.name}({", ".join(cs)})']
+    def myreprOutput(self, pre, cs, post):
+        pre += [f'{self.name} = {self.__class__.__name__}({self.name!r})'] 
         r = f'{self.name}'
-        return out, r
+        post+= [f'{self.name}({", ".join(cs)})']
+        return pre, r, post
