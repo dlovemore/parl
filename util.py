@@ -31,7 +31,6 @@ and cs is the result of calling visit on each of children(n).
 if visit is to be called recursively, recurseVisit(n) is called
 instead or None is returned for that node.
 """
-    d = {}
     s = set()
     def dfsVisit1(n):
         if n in s: return recurseVisit(n) if recurseVisit else None

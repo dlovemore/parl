@@ -90,20 +90,24 @@ Use g & validateFn to validate parse result. Experimental.
 This also fixes up grammar fields."""
         assert(not cs)
         return self
-    def __repr__(self):
-        return str(self.__class__.__name__) + ":" + str(self.__dict__)
     def myreprRecurse(self):
         return None
+    def myreprPair(self, out, cs):
+        return out, self.myrepr(cs)
     def __repr__(self):
         d={}
-        def visit(n, cs):
-            d[n] = n.myrepr(cs)
-            return d[n]
-        def children(n):
-            return n.subGrammars()
-        def recurse(n):
-            return self.myreprRecurse() or d[n]
-        return dfsVisit(self, visit, children, recurse)
+        def visit(g, outcs):
+            out = sum([x[0] for x in outcs if outcs], [])
+            cs = [x[1] for x in outcs if x or None]
+            o, r = g.myreprPair(out, cs)
+            d[g] = r
+            return o, d[g]
+        def children(g):
+            return g.subGrammars()
+        def recurse1(g):
+            return [], g.myreprRecurse() or d.get(g, None)
+        out, r = dfsVisit(self, visit, children, recurse1)
+        return '\n'.join(out+[r])
 
 def plural(word):
     return word and word+'s'
@@ -230,7 +234,7 @@ class Named(WithSubGrammar):
     def parse(self, tokens, pos):
         return self.grammar.parse(tokens, pos)
     def myrepr(self, cs):
-        return f'{self.grammar!r}[{self.field!r}]'
+        return f'{cs[0]}[{self.field!r}]'
 
 class Opt(WithSubGrammar):
     def __init__(self, grammar):
@@ -384,5 +388,8 @@ make if specified is used to construct return value.
         return self
     def myreprRecurse(self):
         return f'{self.name}'
-    def myrepr(self, cs):
-        return f'\n{self.name} = {self.__class__.__name__}({self.name!r})({", ".join(cs)})'
+    def myreprPair(self, out, cs):
+        out += [f'{self.name} = {self.__class__.__name__}({self.name!r})', 
+                f'{self.name}({", ".join(cs)})']
+        r = f'{self.name}'
+        return out, r
