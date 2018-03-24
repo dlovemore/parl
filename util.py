@@ -36,6 +36,5 @@ instead or None is returned for that node.
     def dfsVisit1(n):
         if n in s: return recurseVisit(n) if recurseVisit else None
         s.add(n)
-        print("dfsVisit1", len(s))
         return visit(n, [dfsVisit1(c) for c in children(n)])
     return dfsVisit1(n)
