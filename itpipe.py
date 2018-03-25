@@ -72,9 +72,9 @@ If instance of Machine use that otherwise if callable apply using Map."""
     if type(f) == str:
         f = fn(f)
     # TODO probably not the best way to do this, use inspect.isclass?
-    if type(f).__name__ in {'classobj', 'type'}: 
-        f = f()
-    if not isinstance(f, Machine) and hasattr(f, '__call__'):
+    #if type(f).__name__ in {'classobj', 'type'}: 
+    #    f = f()
+    if not isinstance(f, Machine) and (hasattr(f, '__call__') or hasattr(f, '__new__')):
         f = Apply(f)
     return f
 
@@ -103,6 +103,7 @@ def forceIterable(iterable): return forceArgs(*iterable)
 class Go(Machine):
     def reverse_or(self, machine):
         return forceIterable(machine.go(Stdin()))
+Go=Go()
 
 class List(Machine):
     def run(self, input):
