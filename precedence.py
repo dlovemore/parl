@@ -15,6 +15,7 @@ So normally + has lower precedence than * meaning a + b * c is parsed as
         rhs=lhs
         checkOp = parseK.pop()
         assert(checkOp == leftOp)
+        assert(prec[checkOp] == prec[leftOp])
         lhs = parseK.pop()
         lhs = (lhs, leftOp, rhs)    # or (leftOp, lhs, rhs)
         leftOp = parseK[-1]
@@ -24,14 +25,12 @@ So normally + has lower precedence than * meaning a + b * c is parsed as
         parseK.append(lhs);
         parseK.append(op);
         leftOp = op
-        lhs = None
-        op = None
-        print(parseK, lhs, op)
     for s in chain(symbols, ''):
         assert(leftOp == parseK[-1])
+        print(parseK, lhs, op, s)
         if lhs is None:
             lhs = s
-            print(parseK, lhs, op)
+            # if s is postfix then 
             assert(s not in prec)
             continue
         elif op is None:
@@ -39,12 +38,14 @@ So normally + has lower precedence than * meaning a + b * c is parsed as
 
         while prec[leftOp] >= prec[op]:
             # = handled same as > implies left associative behaviour
-            if len(parseK) == 1:
+            if prec[leftOp] == 0:
                 break
             reduce()
             assert(leftOp == parseK[-1])
         if prec[leftOp] < prec[op]:
             shift()
+            lhs = None
+            op = None
     print(parseK, lhs, op)
     return lhs
         
@@ -117,9 +118,15 @@ prec = {
 }
 
 from lexer import Lexer
-from itpipe import *
-tokens = Items("2 + 3 * 4 - 5")|Lexer()|Map("_.value")|list|Go
-print(tokens)
-parse = precedenceParse(tokens, prec)
+if False:
+    from itpipe import Items, Map, Go, Input, Print, Apply
+    from functools import partial
+    tokens = Input()|Map(Apply(lambda x: [x])|Lexer()|Map("_.value")|partial(precedenceParse, prec=prec))|Print()|Go
+    print(tokens)
 
-print(parse)
+while True:
+    l = input("expr:")
+    toks = Lexer()([l])
+    strs = [tok.value for tok in toks]
+    parse = precedenceParse(strs, prec)
+    print (parse)
