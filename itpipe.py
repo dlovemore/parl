@@ -2,6 +2,7 @@
 Like unix pipes, but with python iterators -- experimental
 functions, machines etc take as rhs op of |
 """
+import readline
 import itertools
 import sys
 import ast
@@ -111,7 +112,7 @@ class List(Machine):
 
 class oD(Machine):
     def reverse_or(self, machine):
-        return machine.go()
+        return machine.go(None)
 
 class Do(Machine):
     def run(self, inputIterable, iterable):
