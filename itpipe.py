@@ -4,9 +4,11 @@ functions, machines etc take as rhs op of |
 """
 import readline
 import itertools
+import types
 import sys
 import ast
 import re
+
 from parl.fn import fn
 
 # Perhaps call Machine something better?
@@ -35,12 +37,15 @@ Returns an iterable, such as a list. This method can be a generator, yielding re
         """May return more complex object such as indexable or list"""
         return self.go(input)
     def __iter__(self):
-        return self.go(Stdin())
+        return self.go(Input())
     def __or__(self, f):
         machine = toMachine(f)
         return machine.reverse_or(self)
+    def __ror__(self, lhs):
+        return self.reverse_or(lhs)
     def reverse_or(self, lhs):
-        return Pipe(lhs, self)
+        machine = toMachine(lhs)
+        return Pipe(machine, self)
     def __add__(self, machine):
         machine = toMachine(f)
         return "TODO trying to implement a machine chain, but how?"
@@ -52,19 +57,18 @@ Returns an iterable, such as a list. This method can be a generator, yielding re
         s=self.__class__.__name__
         args = hasattr(self, 'args') and self.args
         kwargs = hasattr(self, 'kwargs') and self.kwargs
-        if args or kwargs:
-            s+='('
+        s+='('
+        if args:
+            s+=",".join([repr(a) for a in self.args])
+        if kwargs:
             if args:
-                s+=",".join([repr(a) for a in self.args])
-            if kwargs:
-                if args:
-                    s+=", "
-                s+=",".join([str(k)+"="+str(v) for k,v in self.kwargs.items()])
-            s+=')'
+                s+=", "
+            s+=",".join([str(k)+"="+str(v) for k,v in self.kwargs.items()])
+        s+=')'
         return s
 
 def toMachine(f):
-    """Takes string, fun or machine and returns machine.
+    """Takes string, fun, machine or iterable and returns machine.
 If string, convert to function see fn.py.
 If callable type, then call to instantiate.
 If instance of Machine use that otherwise if callable apply using Map."""
@@ -75,7 +79,9 @@ If instance of Machine use that otherwise if callable apply using Map."""
     # TODO probably not the best way to do this, use inspect.isclass?
     #if type(f).__name__ in {'classobj', 'type'}: 
     #    f = f()
-    if not isinstance(f, Machine) and (hasattr(f, '__call__') or hasattr(f, '__new__')):
+    if hasattr(f, '__iter__') and not isinstance(f, type):
+        f = Do(f)
+    elif hasattr(f, '__call__') or hasattr(f, '__new__'):
         f = Apply(f)
     return f
 
@@ -100,10 +106,23 @@ class Stdin(Machine):
 
 def forceArgs(*args): return args
 def forceIterable(iterable): return forceArgs(*iterable)
+def force(data):
+    if isinstance(data, types.GeneratorType):
+        return forceIterable(data)
+    else:
+        return data
 
 class Go(Machine):
-    def reverse_or(self, machine):
-        return forceIterable(machine.go(Stdin()))
+    # Hack to avoid confusion about Go, Go(), but probably creates more
+    # confusion
+    def __call__(self): return self
+    # possible to make this a subclass of Pipe so it overrides __or__ with
+    # __ror__ and use __ror__ instead of reverse_or see:
+    # https://docs.python.org/3/reference/datamodel.html#emulating-numeric-types
+    # May be better achieved using different operators.
+    def reverse_or(self, lhs):
+        machine = toMachine(lhs)
+        return force(machine.go(Input())) or None
 Go=Go()
 
 class List(Machine):
@@ -111,7 +130,8 @@ class List(Machine):
         return list(input)
 
 class oD(Machine):
-    def reverse_or(self, machine):
+    def reverse_or(self, lhs):
+        machine = toMachine(lhs)
         return machine.go(None)
 
 class Do(Machine):
@@ -162,7 +182,7 @@ class Apply(Machine):
     def run(self, input, *fns):
         arg = input
         for f in fns:
-            arg = f(arg)
+           arg = f(arg)
         return arg
 
 class Arg(Machine):
@@ -205,6 +225,9 @@ class Filter(Machine):
         for x in input:
             if f(x):
                 yield x
+
+def Match(k):
+    return Filter(lambda x: x==k)
 
 class Grep(Machine):
     def run(self, input, pattern, flags='p'):
