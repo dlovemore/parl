@@ -1,0 +1,4 @@
+*.pyc
+__pycache__
+*.ignore*
+.DS_Store
